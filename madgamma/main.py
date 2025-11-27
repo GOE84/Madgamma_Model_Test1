@@ -8,22 +8,11 @@ model_id = "google/medgemma-4b-it"
 print(f"Loading model: {model_id}...")
 try:
     processor = AutoProcessor.from_pretrained(model_id)
-    # Determine device and dtype
-    if torch.backends.mps.is_available():
-        device = torch.device("mps")
-        dtype = torch.bfloat16  # Better numerical stability than float16
-        print("Using MPS (Metal Performance Shaders) acceleration with bfloat16.")
-    else:
-        device = torch.device("cpu")
-        dtype = torch.float32
-        print("Using CPU (MPS not available).")
-
     model = AutoModelForImageTextToText.from_pretrained(
         model_id,
-        device_map=None,
-        torch_dtype=dtype
-    ).to(device)
-    print("Model loaded. Moving to device...")
+        device_map="auto",
+        torch_dtype=torch.bfloat16
+    )
     print("Model and processor loaded successfully.")
 except Exception as e:
     print(f"Failed to load model/processor: {e}")
@@ -65,19 +54,16 @@ else:
 
 # Prompt
 if image:
-    # Gemma chat template
+    # Repeat the image token to match the number of image features (256)
     image_token = "<image_soft_token>"
-    num_image_tokens = 256
-    
-    # Construct prompt with chat template
-    user_prompt = "Analyze this X-ray and summarize the findings."
-    input_text = f"<start_of_turn>user\n{image_token * num_image_tokens}\n{user_prompt}<end_of_turn>\n<start_of_turn>model\n"
+    num_image_tokens = 256 # From error message or processor config
+    input_text = (image_token * num_image_tokens) + "\nAnalyze this X-ray and summarize the findings."
     
     # Manually assemble inputs to bypass processor validation bug
     try:
         # Process image
         image_inputs = processor.image_processor(images=image, return_tensors="pt")
-        pixel_values = image_inputs.pixel_values.to(model.device, dtype=model.dtype)
+        pixel_values = image_inputs.pixel_values.to(model.device)
         
         # Process text
         text_inputs = processor.tokenizer(input_text, return_tensors="pt")
@@ -103,8 +89,4 @@ else:
 
 print("Generating...")
 outputs = model.generate(**inputs, max_new_tokens=200)
-print(f"DEBUG: Output shape: {outputs.shape}")
-print(f"DEBUG: Output tokens: {outputs[0].tolist()}")
-decoded_text = processor.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-print(f"DEBUG: Decoded text: '{decoded_text}'")
-print(decoded_text)
+print(processor.decode(outputs[0], skip_special_tokens=True))
